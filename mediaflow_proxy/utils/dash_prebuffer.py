@@ -133,21 +133,35 @@ class DASHPreBuffer:
                     adaptation_sets = [adaptation_sets]
                 
                 for adaptation_set in adaptation_sets:
-                    # Extract initialization segment
-                    init_segment = adaptation_set.get('SegmentTemplate', {}).get('@initialization')
-                    if init_segment:
-                        init_url = urljoin(base_url, init_segment)
-                        await self._download_init_segment(init_url, headers)
+                    # Process representations within each adaptation set
+                    representations = adaptation_set.get('Representation', [])
+                    if not isinstance(representations, list):
+                        representations = [representations]
                     
-                    # Extract segment template
-                    segment_template = adaptation_set.get('SegmentTemplate', {})
-                    if segment_template:
-                        await self._prebuffer_template_segments(segment_template, base_url, headers)
-                    
-                    # Extract segment list
-                    segment_list = adaptation_set.get('SegmentList', {})
-                    if segment_list:
-                        await self._prebuffer_list_segments(segment_list, base_url, headers)
+                    for representation in representations:
+                        representation_id = representation.get('@id', '')
+                        
+                        # Extract initialization segment from representation or adaptation set
+                        init_segment = (representation.get('SegmentTemplate', {}).get('@initialization') or 
+                                      adaptation_set.get('SegmentTemplate', {}).get('@initialization'))
+                        if init_segment:
+                            # Replace RepresentationID placeholder
+                            init_segment = init_segment.replace('$RepresentationID$', representation_id)
+                            init_segment = init_segment.replace('$Bandwidth$', str(representation.get('@bandwidth', '')))
+                            init_url = urljoin(base_url, init_segment)
+                            await self._download_init_segment(init_url, headers)
+                        
+                        # Extract segment template from representation or adaptation set
+                        segment_template = (representation.get('SegmentTemplate', {}) or 
+                                          adaptation_set.get('SegmentTemplate', {}))
+                        if segment_template:
+                            await self._prebuffer_template_segments(segment_template, base_url, headers, representation_id, representation.get('@bandwidth', ''))
+                        
+                        # Extract segment list from representation or adaptation set
+                        segment_list = (representation.get('SegmentList', {}) or 
+                                      adaptation_set.get('SegmentList', {}))
+                        if segment_list:
+                            await self._prebuffer_list_segments(segment_list, base_url, headers)
                         
         except Exception as e:
             logger.warning(f"Failed to extract segments from MPD: {e}")
@@ -182,7 +196,7 @@ class DASHPreBuffer:
         except Exception as e:
             logger.warning(f"Failed to download init segment {init_url}: {e}")
     
-    async def _prebuffer_template_segments(self, segment_template: dict, base_url: str, headers: Dict[str, str]) -> None:
+    async def _prebuffer_template_segments(self, segment_template: dict, base_url: str, headers: Dict[str, str], representation_id: str = '', bandwidth: str = '') -> None:
         """
         Pre-buffer segments using segment template.
         
@@ -190,6 +204,8 @@ class DASHPreBuffer:
             segment_template (dict): Segment template from MPD
             base_url (str): Base URL for resolving relative URLs
             headers (Dict[str, str]): Headers to use for requests
+            representation_id (str): Representation ID to replace in templates
+            bandwidth (str): Bandwidth to replace in templates
         """
         try:
             media_template = segment_template.get('@media')
@@ -205,6 +221,8 @@ class DASHPreBuffer:
             for i in range(self.prebuffer_segments):
                 segment_number = start_number + i
                 segment_url = media_template.replace('$Number$', str(segment_number))
+                segment_url = segment_url.replace('$RepresentationID$', representation_id)
+                segment_url = segment_url.replace('$Bandwidth$', bandwidth)
                 full_url = urljoin(base_url, segment_url)
                 
                 await self._download_segment(full_url, headers)

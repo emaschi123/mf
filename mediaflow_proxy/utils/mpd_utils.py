@@ -66,7 +66,10 @@ def parse_mpd_dict(
 
     for period in periods:
         parsed_dict["PeriodStart"] = parse_duration(period.get("@start", "PT0S"))
-        for adaptation in period["AdaptationSet"]:
+        adaptations = period["AdaptationSet"]
+        adaptations = adaptations if isinstance(adaptations, list) else [adaptations]
+        
+        for adaptation in adaptations:
             representations = adaptation["Representation"]
             representations = representations if isinstance(representations, list) else [representations]
 
@@ -309,7 +312,13 @@ def parse_segment_template(parsed_dict: dict, item: dict, profile: dict, source:
     # Initialization
     if "@initialization" in item:
         media = item["@initialization"]
-        media = media.replace("$RepresentationID$", profile["id"])
+        
+        # Ensure profile ID is properly set
+        profile_id = profile.get("id", "")
+        if profile_id is None:
+            profile_id = ""
+        
+        media = media.replace("$RepresentationID$", str(profile_id))
         media = media.replace("$Bandwidth$", str(profile["bandwidth"]))
         if not media.startswith("http"):
             media = f"{source}/{media}"
@@ -495,7 +504,13 @@ def create_segment_data(segment: Dict, item: dict, profile: dict, source: str, t
         Dict: The created segment data.
     """
     media_template = item["@media"]
-    media = media_template.replace("$RepresentationID$", profile["id"])
+    
+    # Ensure profile ID is properly set
+    profile_id = profile.get("id", "")
+    if profile_id is None:
+        profile_id = ""
+    
+    media = media_template.replace("$RepresentationID$", str(profile_id))
     media = media.replace("$Number%04d$", f"{segment['number']:04d}")
     media = media.replace("$Number$", str(segment["number"]))
     media = media.replace("$Bandwidth$", str(profile["bandwidth"]))

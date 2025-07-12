@@ -35,6 +35,23 @@ def create_httpx_client(follow_redirects: bool = True, **kwargs) -> httpx.AsyncC
     """Creates an HTTPX client with configured proxy routing"""
     mounts = settings.transport_config.get_mounts()
     kwargs.setdefault("timeout", settings.transport_config.timeout)
+    
+    # Disable SSL verification for NOW TV CloudFront compatibility (like inputstream.adaptive)
+    kwargs.setdefault("verify", False)
+    
+    # Minimal headers exactly like inputstream.adaptive for CloudFront compatibility
+    default_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+        "Referer": "https://www.nowtv.it/",
+        "Origin": "https://www.nowtv.it",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "cross-site",
+        "Sec-CH-UA": '"Google Chrome";v="137", "Not=A-Brand";v="8", "Chromium";v="137"',
+        "Sec-CH-UA-Mobile": "?0",
+        "Sec-CH-UA-Platform": '"Windows"',
+    }
+    kwargs.setdefault("headers", default_headers)
+    
     client = httpx.AsyncClient(mounts=mounts, follow_redirects=follow_redirects, **kwargs)
     return client
 
@@ -62,6 +79,10 @@ async def fetch_with_retry(client, method, url, headers, follow_redirects=True, 
     Raises:
         DownloadError: If the request fails after retries.
     """
+    # Add delay for CloudFront to avoid rate limiting
+    if "cloudfront" in url.lower():
+        await anyio.sleep(0.5)  # 500ms delay for CloudFront
+    
     try:
         response = await client.request(method, url, headers=headers, follow_redirects=follow_redirects, **kwargs)
         response.raise_for_status()
@@ -110,6 +131,10 @@ class Streamer:
             headers (dict): The headers to include in the request.
 
         """
+        # Add delay for CloudFront to avoid rate limiting
+        if "cloudfront" in url.lower():
+            await anyio.sleep(0.5)  # 500ms delay for CloudFront
+        
         try:
             request = self.client.build_request("GET", url, headers=headers)
             self.response = await self.client.send(request, stream=True, follow_redirects=True)
@@ -373,7 +398,16 @@ def encode_mediaflow_proxy_url(
             url = f"{url}/{parse.quote(filename)}"
 
         if query_params:
-            return f"{url}?{urlencode(query_params)}"
+            # Create URL manually to avoid encoding init_url and segment_url
+            url_parts = []
+            for key, value in query_params.items():
+                if key in ['init_url', 'segment_url']:
+                    # Don't encode these URL parameters for CloudFront compatibility
+                    url_parts.append(f"{key}={value}")
+                else:
+                    # Encode other parameters normally
+                    url_parts.append(f"{parse.quote(key)}={parse.quote(str(value))}")
+            return f"{url}?{'&'.join(url_parts)}"
         return url
 
 

@@ -37,7 +37,7 @@ uvicorn = "^0.34.2"
 tqdm = "^4.67.1"
 aiofiles = "^24.1.0"
 beautifulsoup4 = ">=4.13.4"
-lxml = "^5.4.0"
+lxml = ">=5.4,<7.0"
 psutil = "^6.1.0"
 
 
